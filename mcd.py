@@ -124,7 +124,7 @@ class Line:
                     next_char = string[i + 1]
                     combined = char + next_char
                     if combined in kernings[font.id]:
-                        self.content.append(round(kernings[font.id][combined]))
+                        self.content.append(round(kernings[font.id][combined]["kerning_num"]))
                     else:
                         self.content.append(0)
                 else:
@@ -289,6 +289,7 @@ class MCD:
         for font in self.fonts:
             self.fonts_Dict[font.id] = font
 
+    # This function is gonked
     def generate_kernings(self):
         self.kernings = {}
         for font in self.fonts:
@@ -309,15 +310,25 @@ class MCD:
                                 if next_val < 0x8000:
                                     next_char = self.symbols_glyph_Dict[next_val].char
                                     if char + next_char in self.kernings[font.id]:
-                                        self.kernings[font.id][char + next_char] += kerning
-                                        self.kernings[font.id][char + next_char] /= 2
+                                        self.kernings[font.id][char + next_char]["kerning_num"] += kerning
+                                        self.kernings[font.id][char + next_char]["count"] += 1
                                     else:
-                                        self.kernings[font.id][char + next_char] = kerning
+                                        self.kernings[font.id][char + next_char] = {
+                                            "kerning_num": kerning,
+                                            "count": 1
+                                        }
                             idx += 2
                         elif val == 0x8001:
                             idx += 2
                         elif val == 0x8000:
                             idx += 2
+
+        for font in self.kernings.keys():
+            for kerning in self.kernings[font].keys():
+                self.kernings[font][kerning]["kerning_num"] /= self.kernings[font][kerning]["count"]
+
+        #with open("kernings.json", "w") as file:
+        #    json.dump(self.kernings, file, indent=4)
 
     def update_from_json(self, json):
         # Events
