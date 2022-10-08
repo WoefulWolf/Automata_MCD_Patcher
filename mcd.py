@@ -1,11 +1,7 @@
 import copy
 import os, sys
-import codecs
 import json
-
-from matplotlib.font_manager import json_dump
 import ioUtils
-
 import zlib
 
 def hash_event_name(name):
@@ -99,7 +95,7 @@ class Line:
                 idx += 2  # skip kerning
         return result
 
-    def from_string(self, string, symbols, font):
+    def from_string(self, string, symbols, font, kernings):
         self.content = []
         self.padding = 0
         self.below = 0
@@ -122,7 +118,17 @@ class Line:
                 if not glyph_found:
                     raise Exception("Glyph not found in font " + str(font.id) + ": " + char)
                 self.content.append(val)
-                self.content.append(0) # TODO: Kerning
+
+                # Get next char
+                if i + 1 < len(string):
+                    next_char = string[i + 1]
+                    combined = char + next_char
+                    if combined in kernings[font.id]:
+                        self.content.append(round(kernings[font.id][combined]))
+                    else:
+                        self.content.append(0)
+                else:
+                    self.content.append(0)
 
         self.content.append(0x8000)
         return self
@@ -146,14 +152,14 @@ class Text:
 
         return self
 
-    def from_json(self, json, symbols, fonts_dict):
+    def from_json(self, json, symbols, fonts_dict, kernings):
         self.lines = []
         self.vpos = json["vpos"]
         self.hpos = json["hpos"]
         self.font = json["font"]
         split_lines = json["line"].split("\n")
         for line in split_lines:
-            self.lines.append(Line().from_string(line, symbols, fonts_dict[self.font]))
+            self.lines.append(Line().from_string(line, symbols, fonts_dict[self.font], kernings))
 
         return self
 
@@ -178,13 +184,13 @@ class Message:
 
         return self
 
-    def from_json(self, json, symbols, fonts_dict):
-        self.seq_number = json["seq_number"]
+    def from_json(self, json, seq_number, symbols, fonts_dict, kernings):
+        self.seq_number = seq_number
         self.event_name = json["event_name"]
         self.event_id = hash_event_name(self.event_name)
         self.texts = []
         for text in json["texts"]:
-            self.texts.append(Text().from_json(text, symbols, fonts_dict))
+            self.texts.append(Text().from_json(text, symbols, fonts_dict, kernings))
 
         return self
 
@@ -259,6 +265,7 @@ class MCD:
         self.generate_fonts_Dict()
         self.generate_symbols_char_Dict()
         self.generate_symbols_glyph_Dict()
+        self.generate_kernings()
 
         return self
 
@@ -282,6 +289,36 @@ class MCD:
         for font in self.fonts:
             self.fonts_Dict[font.id] = font
 
+    def generate_kernings(self):
+        self.kernings = {}
+        for font in self.fonts:
+            self.kernings[font.id] = {}
+
+        for message in self.messages:
+            for text in message.texts:
+                font = self.fonts_Dict[text.font]
+                for line in text.lines:
+                    idx = 0
+                    while idx < len(line.content):
+                        val = line.content[idx]
+                        if val < 0x8000:
+                            char = self.symbols_glyph_Dict[val].char
+                            kerning = line.content[idx+1]
+                            if kerning != 0:
+                                next_val = line.content[idx+2]
+                                if next_val < 0x8000:
+                                    next_char = self.symbols_glyph_Dict[next_val].char
+                                    if char + next_char in self.kernings[font.id]:
+                                        self.kernings[font.id][char + next_char] += kerning
+                                        self.kernings[font.id][char + next_char] /= 2
+                                    else:
+                                        self.kernings[font.id][char + next_char] = kerning
+                            idx += 2
+                        elif val == 0x8001:
+                            idx += 2
+                        elif val == 0x8000:
+                            idx += 2
+
     def update_from_json(self, json):
         # Events
         self.events = []
@@ -292,8 +329,10 @@ class MCD:
 
         # Messages
         self.messages = []
+        seq_number = json["starting_seq_number"]
         for message in json["messages"]:
-            self.messages.append(Message().from_json(message, self.symbols, self.fonts_Dict))
+            self.messages.append(Message().from_json(message, seq_number, self.symbols, self.fonts_Dict, self.kernings))
+            seq_number += 1
 
         # Header
         self.header.messages_count = len(self.messages)
@@ -301,13 +340,12 @@ class MCD:
 
     def to_json(self):
         json_data = {}
+        json_data["starting_seq_number"] = self.messages[0].seq_number
         json_data["messages"] = []
 
         for msg in self.messages:
             json_data["messages"].append({
-                "seq_number": msg.seq_number,
                 "event_name": self.events_Dict[msg.event_id].name,
-                "event_id": msg.event_id,
                 "texts": []
             })
             for text in msg.texts:
@@ -475,7 +513,7 @@ def json_to_mcd(json_file, mcd_file):
     with open(mcd_file, 'rb') as file:
         mcd = MCD().from_mcd(file)
 
-    org_mcd = copy.deepcopy(mcd)
+    #org_mcd = copy.deepcopy(mcd)
     mcd.update_from_json(json.load(open(json_file, "r")))
 
     outfile = os.path.splitext(json_file)[0] + ".mcd"
