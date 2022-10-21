@@ -507,47 +507,74 @@ class MCD:
             ioUtils.write_utf8(file, event.name, 32)
 
         
-def mcd_to_json(mcd_file):
+def mcd_to_json(mcd_file, out_file=None):
     with open(mcd_file, 'rb') as file:
         mcd = MCD().from_mcd(file)
 
-    outfile = os.path.splitext(mcd_file)[0] + ".json"
+    if out_file is None:
+        out_file = os.path.splitext(mcd_file)[0] + ".json"
 
-    with open(outfile, "w") as f:
+    with open(out_file, "w") as f:
         json_data = mcd.to_json()
         json_str = json.dumps(json_data, indent=4)
         f.write(json_str)
 
-    print("Wrote " + outfile)
+    print("Wrote", out_file)
 
-def json_to_mcd(json_file, mcd_file):
+def json_to_mcd(json_file, mcd_file, out_file=None):
     with open(mcd_file, 'rb') as file:
         mcd = MCD().from_mcd(file)
 
     #org_mcd = copy.deepcopy(mcd)
     mcd.update_from_json(json.load(open(json_file, "r")))
 
-    outfile = os.path.splitext(json_file)[0] + ".mcd"
-    with open(outfile, "wb") as file:
+    if out_file is None:
+        out_file = os.path.splitext(json_file)[0] + ".mcd"
+
+    with open(out_file, "wb") as file:
         mcd.write_file(file)
 
-    print("Wrote " + outfile)
+    print("Wrote", out_file)
+
+def print_usage():
+    print("Usage:\tmcd.py <mcd file> [output json file]"
+          "\n\tmcd.py <json file> <base mcd file> [output mcd file]"
+          "\nInfo:\t- If no output file is specified, the input file name will be used with the appropriate extension."
+          "\n\t- <base mcd file> is used as the base for fonts/glyphs used in the new mcd file.")
+    sys.exit(1)
 
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print_usage()
+
+    if sys.argv[1] in ["-h", "--help"]:
+        print_usage()
+
     in_file = sys.argv[1]
 
     in_file = os.path.normpath(in_file)
     in_file_ext = os.path.splitext(in_file)[1]
 
+    # MCD to JSON
     if in_file_ext == ".mcd":
-        mcd_to_json(in_file)
+        out_file = None
+        if len(sys.argv) > 2:
+            out_file = sys.argv[2]
+            out_file = os.path.normpath(out_file)
+
+        mcd_to_json(in_file, out_file)
     
+    # JSON to MCD
     if in_file_ext == ".json":
         if len(sys.argv) < 3:
-            mcd_file = input("Please specify the MCD file to use as a base for fonts/glyphs:\n")
-        else:
-            mcd_file = sys.argv[2]
-
-        mcd_file = mcd_file.replace('"', "")
+            print_usage()
+        
+        mcd_file = sys.argv[2]
         mcd_file = os.path.normpath(mcd_file)
-        json_to_mcd(in_file, mcd_file)
+
+        out_file = None
+        if len(sys.argv) > 3:
+            out_file = sys.argv[3]
+            out_file = os.path.normpath(out_file)
+
+        json_to_mcd(in_file, mcd_file, out_file)
