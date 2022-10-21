@@ -265,6 +265,8 @@ class MCD:
         self.generate_fonts_Dict()
         self.generate_symbols_char_Dict()
         self.generate_symbols_glyph_Dict()
+
+        self.kernings = {}
         self.generate_kernings()
 
         return self
@@ -289,9 +291,8 @@ class MCD:
         for font in self.fonts:
             self.fonts_Dict[font.id] = font
 
-    # This function is gonked
+    # This function is gonked, should probably not use for now
     def generate_kernings(self):
-        self.kernings = {}
         for font in self.fonts:
             self.kernings[font.id] = {}
 
