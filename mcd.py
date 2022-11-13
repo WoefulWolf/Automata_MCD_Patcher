@@ -515,9 +515,9 @@ def mcd_to_json(mcd_file, out_file=None):
     if out_file is None:
         out_file = os.path.splitext(mcd_file)[0] + ".json"
 
-    with open(out_file, "w") as f:
+    with open(out_file, "w", encoding="utf8") as f:
         json_data = mcd.to_json()
-        json_str = json.dumps(json_data, indent=4)
+        json_str = json.dumps(json_data, indent=4, ensure_ascii=False)
         f.write(json_str)
 
     print("Wrote", out_file)
@@ -527,7 +527,7 @@ def json_to_mcd(json_file, mcd_file, out_file=None):
         mcd = MCD().from_mcd(file)
 
     #org_mcd = copy.deepcopy(mcd)
-    mcd.update_from_json(json.load(open(json_file, "r")))
+    mcd.update_from_json(json.load(open(json_file, "r", encoding="utf8")))
 
     if out_file is None:
         out_file = os.path.splitext(json_file)[0] + ".mcd"
