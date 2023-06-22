@@ -69,7 +69,7 @@ class Line:
     def to_string(self, symbols_glyph_Dict, font):   # I stole this :) https://github.com/synspawacza/nier_automata_localization
         result = ""
         idx = 0
-        while idx < len(self.content):
+        while idx < len(self.content) - 1:
             char_id = self.content[idx]
             if char_id < 0x8000:
                 result += symbols_glyph_Dict[char_id].char
