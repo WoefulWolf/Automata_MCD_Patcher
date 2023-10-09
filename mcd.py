@@ -110,7 +110,7 @@ class Line:
                         continue
                     glyph_found = False
                     if symbol.char == char:
-                        val = symbol.glyph_id
+                        val = symbol.glyph_index
                         glyph_found = True
                         break
                 self.below = font.below
@@ -200,7 +200,14 @@ class Symbol:
     def from_mcd(self, file):
         self.font_id = ioUtils.read_int16(file)
         self.char = file.read(2).decode("utf-16-le")
-        self.glyph_id = ioUtils.read_int32(file)
+        self.glyph_index = ioUtils.read_int32(file)
+
+        return self
+    
+    def from_json(self, json, font_id):
+        self.font_id = font_id
+        self.char = json["char"]
+        self.glyph_index = json["glyph_index"]
 
         return self
 
@@ -232,6 +239,46 @@ class Font:
         self.horiz = ioUtils.read_float(file)
 
         return self
+    
+    def from_json(self, json):
+        self.id = json["id"]
+        self.width = json["width"]
+        self.height = json["height"]
+        self.below = json["below"]
+        self.horiz = json["horiz"]
+
+        return self
+
+class Glyph:
+    struct_size = 40
+
+    def from_mcd(self, file):
+        self.texture_id = ioUtils.read_uint32(file)
+        self.u1 = ioUtils.read_float(file)
+        self.v1 = ioUtils.read_float(file)
+        self.u2 = ioUtils.read_float(file)
+        self.v2 = ioUtils.read_float(file)
+        self.width = ioUtils.read_float(file)
+        self.height = ioUtils.read_float(file)
+        self.u_a = ioUtils.read_float(file)
+        self.below = ioUtils.read_float(file)
+        self.horiz = ioUtils.read_float(file)
+
+        return self
+    
+    def from_json(self, json):
+        self.texture_id = json["texture_id"]
+        self.u1 = json["u1"]
+        self.v1 = json["v1"]
+        self.u2 = json["u2"]
+        self.v2 = json["v2"]
+        self.width = json["width"]
+        self.height = json["height"]
+        self.u_a = json["u_a"]
+        self.below = json["below"]
+        self.horiz = json["horiz"]
+
+        return self
 
 class MCD:
     def from_mcd(self, file):
@@ -247,9 +294,10 @@ class MCD:
         for i in range(self.header.symbols_count):
             self.symbols.append(Symbol().from_mcd(file))
 
-        # Imma just skip over glyphs for now
         file.seek(self.header.glyphs_offset)
-        self.glyphs = file.read(self.header.glyphs_count * 40)
+        self.glyphs = []
+        for i in range(self.header.glyphs_count):
+            self.glyphs.append(Glyph().from_mcd(file))
 
         file.seek(self.header.fonts_offset)
         self.fonts = []
@@ -284,7 +332,7 @@ class MCD:
     def generate_symbols_glyph_Dict(self):
         self.symbols_glyph_Dict = {}
         for symbol in self.symbols:
-            self.symbols_glyph_Dict[symbol.glyph_id] = symbol
+            self.symbols_glyph_Dict[symbol.glyph_index] = symbol
 
     def generate_fonts_Dict(self):
         self.fonts_Dict = {}
@@ -301,23 +349,23 @@ class MCD:
                 font = self.fonts_Dict[text.font]
                 for line in text.lines:
                     idx = 0
-                    while idx < len(line.content):
+                    while idx < len(line.content) - 1:
                         val = line.content[idx]
                         if val < 0x8000:
                             char = self.symbols_glyph_Dict[val].char
                             kerning = line.content[idx+1]
-                            if kerning != 0:
-                                next_val = line.content[idx+2]
-                                if next_val < 0x8000:
-                                    next_char = self.symbols_glyph_Dict[next_val].char
-                                    if char + next_char in self.kernings[font.id]:
-                                        self.kernings[font.id][char + next_char]["kerning_num"] += kerning
-                                        self.kernings[font.id][char + next_char]["count"] += 1
-                                    else:
-                                        self.kernings[font.id][char + next_char] = {
-                                            "kerning_num": kerning,
-                                            "count": 1
-                                        }
+                            next_val = line.content[idx+2]
+                            if next_val < 0x8000:
+                                next_char = self.symbols_glyph_Dict[next_val].char
+                                char_pair = char + next_char
+                                if char_pair in self.kernings[font.id]:
+                                    self.kernings[font.id][char_pair]["kerning_num"] += kerning
+                                    self.kernings[font.id][char_pair]["count"] += 1
+                                else:
+                                    self.kernings[font.id][char_pair] = {
+                                        "kerning_num": kerning,
+                                        "count": 1
+                                    }
                             idx += 2
                         elif val == 0x8001:
                             idx += 2
@@ -332,6 +380,22 @@ class MCD:
         #    json.dump(self.kernings, file, indent=4)
 
     def update_from_json(self, json):
+        # Fonts & Symbols
+        self.fonts = []
+        self.symbols = []
+        for font in json["fonts"]:
+            self.fonts.append(Font().from_json(font))
+            for symbol in font["symbols"]:
+                self.symbols.append(Symbol().from_json(symbol, font["id"]))
+
+        self.generate_fonts_Dict()
+        self.generate_kernings()
+
+        # Glyphs
+        self.glyphs = []
+        for glyph in json["glyphs"]:
+            self.glyphs.append(Glyph().from_json(glyph))
+
         # Events
         self.events = []
         for i, message in enumerate(json["messages"]):
@@ -346,9 +410,13 @@ class MCD:
             self.messages.append(Message().from_json(message, seq_number, self.symbols, self.fonts_Dict, self.kernings))
             seq_number += 1
 
+
         # Header
-        self.header.messages_count = len(self.messages)
         self.header.events_count = len(self.events)
+        self.header.messages_count = len(self.messages)
+        self.header.fonts_count = len(self.fonts)
+        self.header.symbols_count = len(self.symbols)
+        self.header.glyphs_count = len(self.glyphs)
 
     def to_json(self):
         json_data = {}
@@ -372,14 +440,33 @@ class MCD:
         for font in self.fonts:
             json_data["fonts"].append({
                 "id": font.id,
+                "width": font.width,
+                "height": font.height,
+                "below": font.below,
+                "horiz": font.horiz,
                 "symbols": []
             })
             for symbol in self.symbols:
                 if symbol.font_id == font.id:
                     json_data["fonts"][-1]["symbols"].append({
                         "char": symbol.char,
-                        "glyph_id": symbol.glyph_id
+                        "glyph_index": symbol.glyph_index,
                     })
+
+        json_data["glyphs"] = []
+        for glyph in self.glyphs:
+            json_data["glyphs"].append({
+                "texture_id": glyph.texture_id,
+                "u1": glyph.u1,
+                "v1": glyph.v1,
+                "u2": glyph.u2,
+                "v2": glyph.v2,
+                "width": glyph.width,
+                "height": glyph.height,
+                "u_a": glyph.u_a,
+                "below": glyph.below,
+                "horiz": glyph.horiz
+            })
         return json_data
 
     def write_file(self, file): # https://github.com/synspawacza/nier_automata_localization
@@ -424,6 +511,7 @@ class MCD:
         current_offset += self.header.symbols_count * Symbol.struct_size + 4
 
         self.header.glyphs_offset = current_offset
+        self.header.glyphs_count = len(self.glyphs)
         current_offset += self.header.glyphs_count * 40 + 4
 
         self.header.fonts_offset = current_offset
@@ -485,11 +573,21 @@ class MCD:
         for symbol in self.symbols:
             ioUtils.write_uInt16(file, symbol.font_id)
             ioUtils.write_utf16(file, symbol.char, 2)
-            ioUtils.write_uInt32(file, symbol.glyph_id)
+            ioUtils.write_uInt32(file, symbol.glyph_index)
         file.write(write_eager_padding(file.tell(), 4))
 
         # Write glyphs
-        file.write(self.glyphs)
+        for glyph in self.glyphs:
+            ioUtils.write_uInt32(file, glyph.texture_id)
+            ioUtils.write_float(file, glyph.u1)
+            ioUtils.write_float(file, glyph.v1)
+            ioUtils.write_float(file, glyph.u2)
+            ioUtils.write_float(file, glyph.v2)
+            ioUtils.write_float(file, glyph.width)
+            ioUtils.write_float(file, glyph.height)
+            ioUtils.write_float(file, glyph.u_a)
+            ioUtils.write_float(file, glyph.below)
+            ioUtils.write_float(file, glyph.horiz)
         file.write(write_eager_padding(file.tell(), 4))
 
         # Write fonts
